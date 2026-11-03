@@ -1,0 +1,7 @@
+.DS_Store
+Thumbs.db
+*.log
+node_modules/
+# Par sécurité : ne jamais publier une sauvegarde de ses données
+sauvegarde*
+*.backup.json

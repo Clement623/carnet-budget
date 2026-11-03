@@ -1,49 +1,13 @@
 // ===== 1. Les données de départ =====
 // Une catégorie = id + nom + budget mensuel en centimes (70000 = 700,00 €).
 const CATEGORIES_DE_DEPART = [
-  { id: 1, nom: 'Courses',   budget_mensuel: 30000 },
-  { id: 2, nom: 'Logement',  budget_mensuel: 70000 },
-  { id: 3, nom: 'Transport', budget_mensuel: 9000 },
-  { id: 4, nom: 'Loisirs',   budget_mensuel: 8000 },
-  { id: 5, nom: 'Santé',     budget_mensuel: 4000 },
-  { id: 6, nom: 'Autres',    budget_mensuel: 6000 },
+  { id: 1, nom: 'Courses',   budget_mensuel: 0 },
+  { id: 2, nom: 'Logement',  budget_mensuel: 0 },
+  { id: 3, nom: 'Transport', budget_mensuel: 0 },
+  { id: 4, nom: 'Loisirs',   budget_mensuel: 0 },
+  { id: 5, nom: 'Santé',     budget_mensuel: 0 },
+  { id: 6, nom: 'Autres',    budget_mensuel: 0 },
 ];
-
-// Opérations fictives pour voir l'appli remplie. Le champ "exemple" permet de les retirer d'un coup.
-function jourDuMois(n) {
-  const maintenant = new Date();
-  return dateEnTexte(new Date(maintenant.getFullYear(), maintenant.getMonth(), Math.min(n, maintenant.getDate())));
-}
-
-function creerDepensesExemples() {
-  return [
-    { id: 1, montant: 65000, date: jourDuMois(1), description: 'Loyer',                categorie_id: 2, fixe: true, exemple: true },
-    { id: 2, montant: 7520,  date: jourDuMois(1), description: 'Abonnement transport', categorie_id: 3, fixe: true, exemple: true },
-    { id: 3, montant: 6240,  date: jourDuMois(2), description: 'Carrefour',            categorie_id: 1, exemple: true },
-    { id: 4, montant: 4500,  date: jourDuMois(2), description: 'Concert',              categorie_id: 4, exemple: true },
-    { id: 5, montant: 1850,  date: jourDuMois(3), description: 'Pharmacie',            categorie_id: 5, exemple: true },
-    { id: 6, montant: 4815,  date: jourDuMois(5), description: 'Lidl',                 categorie_id: 1, exemple: true },
-    { id: 7, montant: 5200,  date: jourDuMois(6), description: 'Sortie au bowling',    categorie_id: 4, exemple: true },
-    ...creerFixesExemples(8),
-  ];
-}
-function creerFixesExemples(premierId) {
-  return [
-    { id: premierId,     montant: 1599, date: jourDuMois(1), description: 'Forfait téléphone',  categorie_id: 6, fixe: true, exemple: true },
-    { id: premierId + 1, montant: 1099, date: jourDuMois(2), description: 'Abonnement musique', categorie_id: 4, fixe: true, exemple: true },
-  ];
-}
-// Un frais qui n'est pas encore passé ce mois-ci, pour voir l'indication « à venir ».
-function creerModeleAVenirExemple(id) {
-  return { id, description: 'Assurance habitation', montant: 1840, jour: 20, categorie_id: 2, dernier_mois: moisVoisin(cleDuMois(new Date()), -1), actif: true, exemple: true };
-}
-function creerRevenusExemples() {
-  return [{ id: 1, montant: 185000, date: jourDuMois(1), description: 'Salaire', exemple: true }];
-}
-// Dans la table "epargne", un montant positif est un versement et un montant négatif un retrait.
-function creerEpargneExemples() {
-  return [{ id: 1, montant: 15000, date: jourDuMois(2), description: 'Virement sur le livret', exemple: true }];
-}
 
 // Les trois tables d'opérations. Elles fonctionnent toutes de la même façon.
 const TABLES = { depense: 'depenses', revenu: 'revenus', epargne: 'epargne' };
@@ -64,29 +28,21 @@ async function ouvrirBase() {
     db.version(1).stores({ categories: 'id', depenses: 'id, date, categorie_id' });
     // Version 2 : on ajoute deux tables. Dexie conserve les données déjà enregistrées.
     db.version(2).stores({ revenus: 'id, date', epargne: 'id, date' }).upgrade(async (transaction) => {
-      // Si les exemples sont encore là, on complète avec un revenu et une épargne fictifs.
-      const exemples = await transaction.table('depenses').filter((d) => d.exemple).count();
-      if (exemples > 0) {
-        await transaction.table('revenus').bulkPut(creerRevenusExemples());
-        await transaction.table('epargne').bulkPut(creerEpargneExemples());
-      }
     });
     // Version 3 : les dépenses peuvent porter la marque "fixe". Aucune donnée n'est perdue.
-    db.version(3).stores({}).upgrade(async (transaction) => {
-      const depenses = transaction.table('depenses');
-      const exemples = await depenses.filter((d) => d.exemple).toArray();
-      if (exemples.length === 0) return;
-      await depenses.filter((d) => d.exemple && ['Loyer', 'Abonnement transport'].includes(d.description)).modify({ fixe: true });
-      const dernierId = (await depenses.toArray()).reduce((max, d) => Math.max(max, d.id), 0);
-      await depenses.bulkPut(creerFixesExemples(dernierId + 1));
-    });
+    db.version(3).stores({});
     // Version 4 : chaque frais fixe a un modèle qui sert à le recréer tous les mois.
     db.version(4).stores({ modeles: 'id' }).upgrade(async (transaction) => {
       const depenses = await transaction.table('depenses').toArray();
       const modeles = creerModelesDepuisFixes(depenses);
-      if (depenses.some((d) => d.exemple)) modeles.push(creerModeleAVenirExemple(modeles.length + 1));
       await transaction.table('depenses').bulkPut(depenses);
       await transaction.table('modeles').bulkPut(modeles);
+    });
+    // Version 5 : on efface les lignes d'exemple installées par les anciennes versions.
+    db.version(5).stores({}).upgrade(async (transaction) => {
+      for (const nom of ['depenses', 'revenus', 'epargne', 'modeles']) {
+        await transaction.table(nom).filter((l) => l.exemple).delete();
+      }
     });
     await db.open();
     return db;
@@ -103,18 +59,9 @@ async function chargerDonnees() {
     etat.epargne = await base.epargne.toArray();
     etat.modeles = await base.modeles.toArray();
   }
-  // Premier lancement : aucune catégorie, donc on installe celles de départ et les exemples.
+  // Premier lancement : aucune catégorie, donc on installe celles de départ.
   if (etat.categories.length === 0) {
-    const depenses = creerDepensesExemples();
-    const modeles = creerModelesDepuisFixes(depenses);
-    modeles.push(creerModeleAVenirExemple(modeles.length + 1));
-    await remplacerTout({
-      categories: CATEGORIES_DE_DEPART,
-      depenses,
-      revenus: creerRevenusExemples(),
-      epargne: creerEpargneExemples(),
-      modeles,
-    });
+    await remplacerTout({ categories: CATEGORIES_DE_DEPART, depenses: [], revenus: [], epargne: [], modeles: [] });
   }
 }
 
@@ -242,7 +189,7 @@ function pointDeDepart(mois) {
 }
 
 function creerModele(id, depense) {
-  const modele = {
+  return {
     id,
     description: depense.description,
     montant: depense.montant,
@@ -251,8 +198,6 @@ function creerModele(id, depense) {
     dernier_mois: pointDeDepart(depense.date.slice(0, 7)), // Le dernier mois déjà traité.
     actif: true,
   };
-  if (depense.exemple) modele.exemple = true;
-  return modele;
 }
 
 // Crée un modèle pour chaque frais fixe qui n'en a pas (anciennes données et anciennes sauvegardes).
@@ -295,7 +240,6 @@ async function genererFraisFixes() {
         fixe: true,
         modele_id: modele.id,
       };
-      if (modele.exemple) depense.exemple = true;
       etat.depenses.push(depense);
       nouvelles.push(depense);
       modele.dernier_mois = mois;
@@ -605,19 +549,6 @@ async function supprimer(type, ligne) {
     afficherMessage('Opération rétablie');
   });
 }
-
-$('retirer-exemples').addEventListener('click', async () => {
-  for (const table of Object.values(TABLES)) {
-    const ids = etat[table].filter((l) => l.exemple).map((l) => l.id);
-    etat[table] = etat[table].filter((l) => !l.exemple);
-    await ecrire(() => base[table].bulkDelete(ids));
-  }
-  const modelesExemples = etat.modeles.filter((m) => m.exemple).map((m) => m.id);
-  etat.modeles = etat.modeles.filter((m) => !m.exemple);
-  await ecrire(() => base.modeles.bulkDelete(modelesExemples));
-  afficher();
-  afficherMessage('Exemples retirés');
-});
 
 
 // ===== 8. Modifier une opération =====
@@ -933,7 +864,6 @@ function afficher() {
   afficherFraisFixes(bilan);
   afficherCategories(depensesDuMois);
   afficherReleve();
-  $('annonce-exemples').hidden = ![...Object.values(TABLES), 'modeles'].some((table) => etat[table].some((l) => l.exemple));
 
   // Vue "Le code" : la dernière ligne de chaque table, telle qu'elle est stockée.
   const derniere = (lignes) => [...lignes].sort((a, b) => b.id - a.id)[0] || null;
@@ -1005,7 +935,7 @@ function afficherReleve() {
     const etiquette = type === 'depense' ? nomCategorie(ligne.categorie_id)
       : type === 'revenu' ? 'Revenu'
       : ligne.montant > 0 ? 'Mis de côté' : "Repris de l'épargne";
-    const details = creer('span', 'cat', etiquette + (ligne.exemple ? ' · exemple' : ''));
+    const details = creer('span', 'cat', etiquette);
     if (ligne.fixe) details.prepend(creer('span', 'etiquette-fixe', '↻ Fixe'));
     quoi.append(details);
 
