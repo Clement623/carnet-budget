@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Carnet de dépenses</title>
+<meta name="description" content="Suivi de budget personnel. Les données restent sur l'appareil.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="theme-color" content="#e9efec" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1916" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Carnet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="tete">
+  <h1>Carnet de dépenses</h1>
+  <nav class="onglets" aria-label="Vues">
+    <button type="button" id="onglet-budget" aria-pressed="true">Mon budget</button>
+    <button type="button" id="onglet-code" aria-pressed="false">Le code</button>
+  </nav>
+</header>
+
+<main>
+  <div id="vue-budget">
+    <div class="annonce grave" id="annonce-base" hidden>Ce navigateur bloque l'enregistrement. Tes données disparaîtront quand tu fermeras la page.</div>
+    <div class="annonce" id="annonce-exemples" hidden>
+      <span>Les lignes marquées « exemple » sont fictives et servent à tester.</span>
+      <button type="button" class="lien" id="retirer-exemples">Retirer les exemples</button>
+    </div>
+
+    <div class="grille">
+      <div class="colonne">
+        <section aria-label="Solde et résumé du mois">
+          <div class="mois">
+            <button type="button" class="rond" id="mois-avant" aria-label="Mois précédent">‹</button>
+            <h2 id="mois-nom" aria-live="polite"></h2>
+            <button type="button" class="rond" id="mois-apres" aria-label="Mois suivant">›</button>
+          </div>
+          <p class="solde-titre" id="solde-titre">Solde actuel</p>
+          <div class="total" id="total"></div>
+          <p class="solde-prevu" id="solde-prevu" hidden></p>
+          <dl class="compte">
+            <dt>Revenus du mois</dt><dd id="ligne-revenus"></dd>
+            <dt>Dépenses du mois</dt><dd id="ligne-depenses"></dd>
+            <dt class="dont">dont frais fixes</dt><dd class="dont" id="ligne-fixes"></dd>
+            <dt>Mis de côté ce mois-ci</dt><dd id="ligne-epargne"></dd>
+            <dt class="somme-ligne">Reste du mois</dt><dd class="somme-ligne" id="ligne-reste"></dd>
+          </dl>
+        </section>
+
+        <section class="carte-fixes" aria-label="Frais fixes du mois">
+          <div class="fixes-tete">
+            <h2>↻ Frais fixes du mois</h2>
+            <strong id="fixes-total"></strong>
+          </div>
+          <p class="fixes-part" id="fixes-part"></p>
+          <div class="repartition" id="repartition" role="img"></div>
+          <ul class="legende" id="legende"></ul>
+          <ul class="fixes-liste" id="fixes-liste"></ul>
+          <p class="fixes-vide" id="fixes-vide" hidden>Aucun frais fixe ce mois-ci. Coche « Revient chaque mois » en ajoutant une dépense, ou touche ✎ sur une dépense de la liste. Elle s'ajoutera ensuite toute seule.</p>
+        </section>
+
+        <section class="epargne-bandeau" aria-label="Épargne">
+          <span>Mon épargne</span>
+          <strong id="epargne-total"></strong>
+          <span class="evolution" id="epargne-evolution"></span>
+        </section>
+
+        <section aria-label="Budget par catégorie">
+          <h2 class="sous-titre">Budget par catégorie</h2>
+          <p class="postes-resume" id="reste"></p>
+          <p class="legende-jauge"><span class="pastille-couleur" style="background: var(--fixe)"></span>Part des frais fixes dans chaque budget</p>
+          <ul class="postes" id="postes"></ul>
+          <details class="bloc" id="gestion">
+            <summary>Modifier les budgets et les catégories</summary>
+            <div class="gestion">
+              <div class="gestion-entetes" aria-hidden="true"><span>Catégorie</span><span>Budget (€)</span><span></span></div>
+              <div class="gestion-liste" id="gestion-liste"></div>
+              <div class="gestion-ligne gestion-ajout">
+                <input id="nouvelle-categorie" autocomplete="off" placeholder="Nouvelle catégorie" aria-label="Nom de la nouvelle catégorie">
+                <input id="nouveau-budget" class="gestion-budget" inputmode="decimal" autocomplete="off" placeholder="0,00" aria-label="Budget de la nouvelle catégorie">
+                <span></span>
+              </div>
+              <button type="button" class="bouton leger" id="ajouter-categorie">Ajouter la catégorie</button>
+              <p class="erreur" id="erreur-categories" role="alert" hidden></p>
+            </div>
+          </details>
+        </section>
+
+        <form class="fiche" id="formulaire" novalidate>
+          <h2 id="formulaire-titre">Ajouter</h2>
+          <div class="choix" id="choix-type" role="group" aria-label="Type d'opération">
+            <button type="button" id="type-depense" aria-pressed="true">Dépense</button>
+            <button type="button" id="type-revenu" aria-pressed="false">Revenu</button>
+            <button type="button" id="type-epargne" aria-pressed="false">Épargne</button>
+          </div>
+          <div class="champ large" id="champ-sens" hidden>
+            <label for="sens">Opération</label>
+            <select id="sens">
+              <option value="verser">Mettre de côté</option>
+              <option value="retirer">Reprendre de l'épargne</option>
+            </select>
+          </div>
+          <div class="champ">
+            <label for="montant">Montant (€)</label>
+            <input id="montant" inputmode="decimal" autocomplete="off" placeholder="12,50">
+          </div>
+          <div class="champ">
+            <label for="date">Date</label>
+            <input id="date" type="date">
+          </div>
+          <p class="aide large" id="aide-edition" hidden>Le jour choisi s'appliquera aussi aux prochains mois.</p>
+          <div class="champ large">
+            <label for="description">Description</label>
+            <input id="description" autocomplete="off" placeholder="Carrefour, essence, cinéma…">
+          </div>
+          <div class="champ large" id="champ-categorie">
+            <label for="categorie">Catégorie</label>
+            <select id="categorie"></select>
+            <p class="aide" id="suggestion"></p>
+          </div>
+          <div class="champ large" id="champ-fixe">
+            <label class="case" for="est-fixe"><input type="checkbox" id="est-fixe">↻ Revient chaque mois (s'ajoutera automatiquement)</label>
+            <p class="aide" id="suggestion-fixe"></p>
+            <label class="case" for="appliquer-suite" id="champ-suite" hidden><input type="checkbox" id="appliquer-suite" checked>Appliquer aussi aux prochains mois</label>
+          </div>
+          <p class="erreur" id="erreur" role="alert" hidden></p>
+          <div class="pied">
+            <button class="bouton" type="submit" id="enregistrer">Enregistrer la dépense</button>
+            <button class="bouton leger" type="button" id="annuler-edition" hidden>Annuler</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="colonne">
+        <section aria-label="Opérations du mois">
+          <div class="releve-tete">
+            <h2 id="releve-titre">Opérations du mois</h2>
+            <button type="button" class="lien" id="sans-filtre" hidden>Tout afficher</button>
+          </div>
+          <div class="filtres" role="group" aria-label="Filtrer les opérations">
+            <button type="button" data-filtre="tout" aria-pressed="true">Tout</button>
+            <button type="button" data-filtre="depense" aria-pressed="false">Dépenses</button>
+            <button type="button" data-filtre="fixe" aria-pressed="false">↻ Frais fixes</button>
+            <button type="button" data-filtre="revenu" aria-pressed="false">Revenus</button>
+            <button type="button" data-filtre="epargne" aria-pressed="false">Épargne</button>
+          </div>
+          <ul class="releve" id="releve"></ul>
+          <p class="vide" id="releve-vide" hidden>Aucune opération ici pour ce mois. Ajoute la première avec le formulaire.</p>
+        </section>
+
+        <details class="bloc">
+          <summary>Sauvegarder ou restaurer mes données</summary>
+          <div class="sauvegarde">
+            <p>Tes données restent uniquement dans ce navigateur. Copie ce texte et garde-le dans un endroit sûr, par exemple dans tes notes.</p>
+            <div class="rangee">
+              <button type="button" class="bouton leger" id="preparer">Afficher la sauvegarde</button>
+              <button type="button" class="bouton leger" id="copier" hidden>Copier le texte</button>
+            </div>
+            <label for="texte-sauvegarde">Texte de sauvegarde</label>
+            <textarea id="texte-sauvegarde" spellcheck="false" placeholder="Pour restaurer, colle ici une sauvegarde."></textarea>
+            <div class="rangee"><button type="button" class="bouton leger" id="restaurer">Restaurer depuis ce texte</button></div>
+            <p class="erreur" id="erreur-sauvegarde" role="alert" hidden></p>
+          </div>
+        </details>
+      </div>
+    </div>
+  </div>
+
+  <div id="vue-code" class="explication" hidden>
+    <h2>Comment ça fonctionne</h2>
+    <ul class="parcours" aria-label="Parcours d'une opération">
+      <li>Tu remplis le formulaire</li><li>Le code vérifie le montant</li><li>L'opération va dans sa table</li><li>Le solde est recalculé</li><li>L'écran est redessiné</li>
+    </ul>
+    <p>Voici la dernière ligne enregistrée dans chaque table. Ajoute une opération dans « Mon budget » puis reviens ici. Les montants sont stockés en centimes, un retrait d'épargne est un montant négatif, et « modeles » contient ce qui sert à recréer les frais fixes.</p>
+    <pre id="apercu-base" tabindex="0"></pre>
+    <p>Et voici le vrai code de l'appli, découpé par étape. Il est lu directement dans le fichier js/app.js, donc c'est exactement celui qui tourne.</p>
+    <div id="sections-code"></div>
+  </div>
+</main>
+
+<div id="message" aria-live="polite"></div>
+
+<script src="js/dexie.min.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
