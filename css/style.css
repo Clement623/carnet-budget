@@ -177,3 +177,11 @@ pre { background: var(--code-fond); border-radius: 8px; padding: 12px; overflow-
 #message > div { pointer-events: auto; background: var(--encre); color: var(--fond); border-radius: 10px; padding: 10px 14px; display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; max-width: 30rem; }
 #message button { background: none; border: 0; color: inherit; text-decoration: underline; font-weight: 700; cursor: pointer; padding: 4px; }
 @media (prefers-reduced-motion: no-preference) { .jauge i { transition: width .25s ease; } }
+
+/* Les cartes */
+.barre-cartes { display: flex; align-items: center; gap: 10px; }
+.barre-cartes label { font-weight: 700; }
+.barre-cartes select { flex: 1; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--discret); border-radius: 8px; background: var(--surface); color: var(--encre); font-weight: 700; }
+.ajout-carte { border-top: 0; padding-block: 8px; }
+.ajout-carte .rangee { margin-top: 8px; }
+.ajout-carte input { flex: 1 1 12rem; min-width: 0; min-height: 44px; padding: 8px 10px; border: 1px solid var(--discret); border-radius: 8px; background: var(--surface); color: var(--encre); }

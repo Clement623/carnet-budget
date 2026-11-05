@@ -9,12 +9,15 @@ const CATEGORIES_DE_DEPART = [
   { id: 6, nom: 'Autres',    budget_mensuel: 0 },
 ];
 
+// La carte qui existe toujours, et qui récupère les données déjà saisies.
+const CARTE_DE_DEPART = { id: 1, nom: 'Carte principale' };
+
 // Les trois tables d'opérations. Elles fonctionnent toutes de la même façon.
 const TABLES = { depense: 'depenses', revenu: 'revenus', epargne: 'epargne' };
 
 // L'état de l'appli : une copie en mémoire de la base, plus ce qui est affiché.
 // filtre vaut 'tout', 'depense', 'revenu', 'epargne' ou le numéro d'une catégorie.
-const etat = { categories: [], depenses: [], revenus: [], epargne: [], modeles: [], mois: cleDuMois(new Date()), filtre: 'tout', typeSaisie: 'depense', edition: null };
+const etat = { cartes: [], carte: CARTE_DE_DEPART.id, categories: [], depenses: [], revenus: [], epargne: [], modeles: [], mois: cleDuMois(new Date()), filtre: 'tout', typeSaisie: 'depense', edition: null };
 
 
 // ===== 2. La base de données =====
@@ -44,6 +47,13 @@ async function ouvrirBase() {
         await transaction.table(nom).filter((l) => l.exemple).delete();
       }
     });
+    // Version 6 : chaque opération appartient à une carte.
+    db.version(6).stores({ cartes: 'id' }).upgrade(async (transaction) => {
+      await transaction.table('cartes').put(CARTE_DE_DEPART);
+      for (const nom of ['depenses', 'revenus', 'epargne', 'modeles']) {
+        await transaction.table(nom).toCollection().modify({ carte_id: CARTE_DE_DEPART.id });
+      }
+    });
     await db.open();
     return db;
   } catch (e) {
@@ -53,6 +63,7 @@ async function ouvrirBase() {
 
 async function chargerDonnees() {
   if (base) {
+    etat.cartes = await base.cartes.toArray();
     etat.categories = await base.categories.toArray();
     etat.depenses = await base.depenses.toArray();
     etat.revenus = await base.revenus.toArray();
@@ -61,8 +72,15 @@ async function chargerDonnees() {
   }
   // Premier lancement : aucune catégorie, donc on installe celles de départ.
   if (etat.categories.length === 0) {
-    await remplacerTout({ categories: CATEGORIES_DE_DEPART, depenses: [], revenus: [], epargne: [], modeles: [] });
+    // Sur une installation neuve, la version 6 ne s'exécute pas : on crée la carte ici.
+    await remplacerTout({ cartes: [{ ...CARTE_DE_DEPART }], categories: CATEGORIES_DE_DEPART, depenses: [], revenus: [], epargne: [], modeles: [] });
   }
+  // Par sécurité, il existe toujours au moins une carte.
+  if (etat.cartes.length === 0) {
+    etat.cartes = [{ ...CARTE_DE_DEPART }];
+    await ecrire(() => base.cartes.put(etat.cartes[0]));
+  }
+  etat.carte = etat.cartes[0].id;
 }
 
 // Exécute une écriture dans la base et prévient si elle échoue.
@@ -75,8 +93,8 @@ async function ecrire(action) {
 async function remplacerTout(donnees) {
   Object.assign(etat, donnees);
   // Une transaction fait tout ou rien : on ne peut pas se retrouver avec une base à moitié vidée.
-  await ecrire(() => base.transaction('rw', base.categories, base.depenses, base.revenus, base.epargne, base.modeles, async () => {
-    for (const nom of ['categories', 'depenses', 'revenus', 'epargne', 'modeles']) {
+  await ecrire(() => base.transaction('rw', base.cartes, base.categories, base.depenses, base.revenus, base.epargne, base.modeles, async () => {
+    for (const nom of ['cartes', 'categories', 'depenses', 'revenus', 'epargne', 'modeles']) {
       await base[nom].clear();
       await base[nom].bulkPut(donnees[nom]);
     }
@@ -143,20 +161,28 @@ function proposerCategorie(description) {
 // Il ne peut donc jamais être faux ou décalé par rapport à la liste.
 function somme(lignes) { return lignes.reduce((total, ligne) => total + ligne.montant, 0); }
 
+// Ne garde que les lignes de la carte affichée.
+function deLaCarte(lignes) {
+  return lignes.filter((ligne) => ligne.carte_id === etat.carte);
+}
+
 function calculerBilan(mois) {
+  const revenusCarte = deLaCarte(etat.revenus);
+  const depensesCarte = deLaCarte(etat.depenses);
+  const epargneCarte = deLaCarte(etat.epargne);
   const duMois = (ligne) => ligne.date.startsWith(mois);
   // Les dates "AAAA-MM-JJ" se comparent comme du texte : on garde tout jusqu'à la fin du mois affiché.
   const jusquAuMois = (ligne) => ligne.date.slice(0, 7) <= mois;
 
-  const revenus = somme(etat.revenus.filter(duMois));
-  const depenses = somme(etat.depenses.filter(duMois));
-  const fixes = somme(etat.depenses.filter((d) => duMois(d) && d.fixe));
-  const epargneDuMois = somme(etat.epargne.filter(duMois));
-  const epargneTotale = somme(etat.epargne.filter(jusquAuMois));
+  const revenus = somme(revenusCarte.filter(duMois));
+  const depenses = somme(depensesCarte.filter(duMois));
+  const fixes = somme(depensesCarte.filter((d) => duMois(d) && d.fixe));
+  const epargneDuMois = somme(epargneCarte.filter(duMois));
+  const epargneTotale = somme(epargneCarte.filter(jusquAuMois));
 
   // Le solde cumule tous les mois. L'argent mis de côté en sort, et y revient s'il est repris.
-  const solde = somme(etat.revenus.filter(jusquAuMois))
-              - somme(etat.depenses.filter(jusquAuMois))
+  const solde = somme(revenusCarte.filter(jusquAuMois))
+              - somme(depensesCarte.filter(jusquAuMois))
               - epargneTotale;
 
   return { revenus, depenses, fixes, epargneDuMois, epargneTotale, solde, reste: revenus - depenses - epargneDuMois };
@@ -195,6 +221,7 @@ function creerModele(id, depense) {
     montant: depense.montant,
     jour: Number(depense.date.slice(8)),
     categorie_id: depense.categorie_id,
+    carte_id: depense.carte_id,
     dernier_mois: pointDeDepart(depense.date.slice(0, 7)), // Le dernier mois déjà traité.
     actif: true,
   };
@@ -206,7 +233,7 @@ function creerModelesDepuisFixes(depenses) {
   const parNom = new Map();
   const fixes = depenses.filter((d) => d.fixe).sort((a, b) => b.date.localeCompare(a.date));
   for (const depense of fixes) { // La plus récente d'abord : elle donne le montant et le jour.
-    const cle = depense.description + '|' + depense.categorie_id;
+    const cle = depense.carte_id + '|' + depense.description + '|' + depense.categorie_id;
     if (!parNom.has(cle)) {
       const modele = creerModele(modeles.length + 1, depense);
       parNom.set(cle, modele);
@@ -237,6 +264,7 @@ async function genererFraisFixes() {
         date,
         description: modele.description,
         categorie_id: modele.categorie_id,
+        carte_id: modele.carte_id,
         fixe: true,
         modele_id: modele.id,
       };
@@ -259,7 +287,7 @@ async function genererFraisFixes() {
 // ils sont seulement déduits des modèles.
 function fraisAVenir(jusquAuMois) {
   const resultat = [];
-  for (const modele of etat.modeles) {
+  for (const modele of deLaCarte(etat.modeles)) {
     if (!modele.actif) continue;
     let mois = moisVoisin(modele.dernier_mois, 1);
     while (mois <= jusquAuMois) {
@@ -316,7 +344,7 @@ async function arreterFrais(modele) {
 
 // Dessine la barre : quelle part du mois partent en frais fixes, autres dépenses et épargne.
 function afficherFraisFixes(bilan) {
-  const passes = etat.depenses.filter((d) => d.fixe && d.date.startsWith(etat.mois));
+  const passes = deLaCarte(etat.depenses).filter((d) => d.fixe && d.date.startsWith(etat.mois));
   const attendus = fraisAVenir(etat.mois).filter((f) => f.mois === etat.mois);
   const aVenir = attendus.reduce((total, f) => total + f.modele.montant, 0);
 
@@ -492,7 +520,7 @@ $('formulaire').addEventListener('submit', async (evenement) => {
   else if (!description) probleme = 'Ajoute une description pour retrouver cette opération.';
   else if (type === 'depense' && !categorieId) probleme = 'Choisis une catégorie.';
   else if (type === 'epargne') {
-    const autres = etat.epargne.filter((l) => !edition || l !== edition.ligne);
+    const autres = deLaCarte(etat.epargne).filter((l) => !edition || l !== edition.ligne);
     if (!epargneResteraPositive([...autres, { montant: montantSigne, date }])) {
       probleme = 'Impossible : ton épargne deviendrait négative. Vérifie le montant et la date.';
     }
@@ -509,7 +537,7 @@ $('formulaire').addEventListener('submit', async (evenement) => {
 
   // L'objet enregistré. Seules les dépenses ont une catégorie, et un retrait devient négatif.
   const table = TABLES[type];
-  const ligne = { id: prochainId(etat[table]), montant: montantSigne, date, description };
+  const ligne = { id: prochainId(etat[table]), carte_id: etat.carte, montant: montantSigne, date, description };
   if (type === 'depense') {
     ligne.categorie_id = categorieId;
     if ($('est-fixe').checked) {
@@ -531,7 +559,7 @@ $('formulaire').addEventListener('submit', async (evenement) => {
 
 async function supprimer(type, ligne) {
   const table = TABLES[type];
-  if (type === 'epargne' && !epargneResteraPositive(etat.epargne.filter((l) => l !== ligne))) {
+  if (type === 'epargne' && !epargneResteraPositive(deLaCarte(etat.epargne).filter((l) => l !== ligne))) {
     afficherMessage("Impossible : ton épargne deviendrait négative. Supprime d'abord la reprise correspondante.");
     return;
   }
@@ -860,7 +888,7 @@ function afficher() {
   $('reste').textContent = euros(bilan.depenses) + ' sur ' + euros(budgetTotal) + ' prévus · ';
   $('reste').append(creer('strong', '', resteBudget < 0 ? 'dépassé de ' + euros(-resteBudget) : 'reste ' + euros(resteBudget)));
 
-  const depensesDuMois = etat.depenses.filter((d) => d.date.startsWith(etat.mois));
+  const depensesDuMois = deLaCarte(etat.depenses).filter((d) => d.date.startsWith(etat.mois));
   afficherFraisFixes(bilan);
   afficherCategories(depensesDuMois);
   afficherReleve();
@@ -868,7 +896,7 @@ function afficher() {
   // Vue "Le code" : la dernière ligne de chaque table, telle qu'elle est stockée.
   const derniere = (lignes) => [...lignes].sort((a, b) => b.id - a.id)[0] || null;
   $('apercu-base').textContent = JSON.stringify({
-    depenses: derniere(etat.depenses), revenus: derniere(etat.revenus), epargne: derniere(etat.epargne), modeles: derniere(etat.modeles),
+    cartes: derniere(etat.cartes), depenses: derniere(etat.depenses), revenus: derniere(etat.revenus), epargne: derniere(etat.epargne), modeles: derniere(etat.modeles),
   }, null, 2);
 }
 
@@ -909,7 +937,7 @@ function afficherReleve() {
   // On réunit les trois tables en une seule liste, en notant le type de chaque ligne.
   const lignes = [];
   for (const [type, table] of Object.entries(TABLES)) {
-    for (const ligne of etat[table]) {
+    for (const ligne of deLaCarte(etat[table])) {
       if (ligne.date.startsWith(etat.mois)) lignes.push({ type, ligne });
     }
   }
@@ -986,7 +1014,7 @@ function afficherMessage(texte, libelleAction, action) {
 // ===== 11. La sauvegarde =====
 // Les données ne vivent que sur l'appareil. Ce texte permet de les retrouver si le navigateur est vidé.
 $('preparer').addEventListener('click', () => {
-  $('texte-sauvegarde').value = JSON.stringify({ categories: etat.categories, depenses: etat.depenses, revenus: etat.revenus, epargne: etat.epargne, modeles: etat.modeles }, null, 1);
+  $('texte-sauvegarde').value = JSON.stringify({ cartes: etat.cartes, categories: etat.categories, depenses: etat.depenses, revenus: etat.revenus, epargne: etat.epargne, modeles: etat.modeles }, null, 1);
   $('copier').hidden = false;
 });
 
@@ -1019,13 +1047,24 @@ function lireSauvegarde(texte) {
   if (!Array.isArray(revenus) || !Array.isArray(epargne) || !revenus.every((r) => base_ok(r) && r.montant > 0) || !epargne.every((e) => base_ok(e) && e.montant !== 0)) {
     throw new Error("Un revenu ou une opération d'épargne de cette sauvegarde est incorrect. Rien n'a été modifié.");
   }
+  // Une sauvegarde sans cartes : tout va sur la carte de départ.
+  const cartes = Array.isArray(donnees.cartes) && donnees.cartes.length > 0 ? donnees.cartes : [{ ...CARTE_DE_DEPART }];
+  if (!cartes.every((c) => Number.isInteger(c.id) && typeof c.nom === 'string' && c.nom.trim())) {
+    throw new Error("Une carte de cette sauvegarde est incorrecte. Rien n'a été modifié.");
+  }
+  const idsCartes = new Set(cartes.map((c) => c.id));
+  for (const ligne of [...donnees.depenses, ...revenus, ...epargne, ...(donnees.modeles || [])]) {
+    if (ligne.carte_id === undefined) ligne.carte_id = cartes[0].id;
+    if (!idsCartes.has(ligne.carte_id)) throw new Error("Une opération vise une carte inconnue. Rien n'a été modifié.");
+  }
+
   // Une sauvegarde plus ancienne n'a pas de modèles : on les recrée à partir des frais fixes.
   const modeles = donnees.modeles || creerModelesDepuisFixes(donnees.depenses);
   const modeleCorrect = (m) => Number.isInteger(m.id) && Number.isInteger(m.montant) && m.montant > 0
     && Number.isInteger(m.jour) && m.jour >= 1 && m.jour <= 31 && /^\d{4}-\d{2}$/.test(m.dernier_mois)
     && typeof m.description === 'string' && ids.has(m.categorie_id) && typeof m.actif === 'boolean';
   if (!Array.isArray(modeles) || !modeles.every(modeleCorrect)) throw new Error("Un frais fixe de cette sauvegarde est incorrect. Rien n'a été modifié.");
-  return { categories: donnees.categories, depenses: donnees.depenses, revenus, epargne, modeles };
+  return { cartes, categories: donnees.categories, depenses: donnees.depenses, revenus, epargne, modeles };
 }
 
 function compter(n) { return n + (n > 1 ? ' opérations' : ' opération'); }
@@ -1056,6 +1095,8 @@ $('restaurer').addEventListener('click', async () => {
   annulerConfirmation();
   if (etat.edition) quitterEdition();
   await remplacerTout(donnees);
+  etat.carte = etat.cartes[0].id;
+  remplirListeCartes();
   await genererFraisFixes();
   etat.filtre = 'tout';
   remplirListeCategories();
@@ -1065,7 +1106,45 @@ $('restaurer').addEventListener('click', async () => {
 });
 
 
-// ===== 12. Le démarrage =====
+// ===== 12. Les cartes =====
+function remplirListeCartes() {
+  const liste = $('carte-active');
+  liste.replaceChildren();
+  for (const carte of etat.cartes) liste.append(new Option(carte.nom, String(carte.id)));
+  liste.value = String(etat.carte);
+}
+
+$('carte-active').addEventListener('change', () => {
+  if (etat.edition) quitterEdition(); // Une modification en cours concerne l'ancienne carte.
+  etat.carte = Number($('carte-active').value);
+  etat.filtre = 'tout';
+  afficher();
+});
+
+$('ajouter-carte').addEventListener('click', async () => {
+  const nom = $('nom-nouvelle-carte').value.trim();
+  const dejaPris = etat.cartes.some((c) => c.nom.toLowerCase() === nom.toLowerCase());
+  const probleme = !nom ? 'Donne un nom à la carte.' : dejaPris ? 'Une carte porte déjà ce nom.' : '';
+  $('erreur-carte').textContent = probleme;
+  $('erreur-carte').hidden = !probleme;
+  if (probleme) return;
+
+  const carte = { id: prochainId(etat.cartes), nom };
+  etat.cartes.push(carte);
+  await ecrire(() => base.cartes.add(carte));
+
+  // On se place tout de suite sur la nouvelle carte.
+  if (etat.edition) quitterEdition();
+  etat.carte = carte.id;
+  etat.filtre = 'tout';
+  $('nom-nouvelle-carte').value = '';
+  remplirListeCartes();
+  afficher();
+  afficherMessage('Carte créée : ' + nom);
+});
+
+
+// ===== 13. Le démarrage =====
 function changerVue(code) {
   $('vue-budget').hidden = code;
   $('vue-code').hidden = !code;
@@ -1126,6 +1205,7 @@ async function demarrer() {
   $('annonce-base').hidden = Boolean(base);
   await chargerDonnees();
   const ajoutes = await genererFraisFixes();
+  remplirListeCartes();
   remplirListeCategories();
   afficherGestionCategories();
   afficher();

@@ -31,6 +31,18 @@
     <div class="grille">
       <div class="colonne">
         <section aria-label="Solde et résumé du mois">
+          <div class="barre-cartes">
+            <label for="carte-active">Carte</label>
+            <select id="carte-active"></select>
+          </div>
+          <details class="bloc ajout-carte">
+            <summary>Ajouter une carte</summary>
+            <div class="rangee">
+              <input id="nom-nouvelle-carte" autocomplete="off" placeholder="Carte du compte commun" aria-label="Nom de la nouvelle carte">
+              <button type="button" class="bouton leger" id="ajouter-carte">Créer la carte</button>
+            </div>
+            <p class="erreur" id="erreur-carte" role="alert" hidden></p>
+          </details>
           <div class="mois">
             <button type="button" class="rond" id="mois-avant" aria-label="Mois précédent">‹</button>
             <h2 id="mois-nom" aria-live="polite"></h2>
